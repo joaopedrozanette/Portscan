@@ -76,5 +76,5 @@ Ele funciona enviando pacotes para portas específicas e analisando as respostas
 Clone o repositório:
 
 ```bash
-git clone <url-do-repositorio>
+git clone https://github.com/joaopedrozanette/Portscan.git
 cd Portscan
