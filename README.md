@@ -82,12 +82,12 @@ cd Portscan
 
 ## Instalação
 
-Instale a dependência principal:
+##Instale a dependência principal:
 
-```bash
+
 pip install scapy
 
-Execução do Script:
+##Execução do Script:
 
 sudo python3 portscan.py
 
