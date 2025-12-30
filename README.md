@@ -78,3 +78,12 @@ Clone o repositório:
 ```bash
 git clone https://github.com/joaopedrozanette/Portscan.git
 cd Portscan
+
+
+## Instalação
+
+Instale a dependência principal:
+
+```bash
+pip install scapy
+
