@@ -1,157 +1,80 @@
-Port Scanner em Python (Scapy)
+# Port Scanner em Python (Scapy)
 
-Implementação de um scanner de portas em Python utilizando Scapy, com suporte a diferentes tipos de varredura TCP e UDP, validação de alvos e tratamento de erros.
+Implementação de um scanner de portas em Python utilizando **Scapy**, com suporte a diferentes tipos de varredura TCP e UDP, validação de alvos e tratamento de erros.
 
-O projeto trabalha diretamente com pacotes de rede, permitindo observar como scanners como o Nmap funcionam em baixo nível.
+O projeto trabalha diretamente com pacotes de rede, permitindo observar como ferramentas como o **Nmap** operam em baixo nível, especialmente no envio e na interpretação de respostas de pacotes de rede.
 
-O que é um Port Scanner
+---
 
-Um port scanner é uma ferramenta usada para identificar quais portas de rede estão abertas, fechadas ou filtradas em um host.
+## O que é um Port Scanner
+
+Um port scanner é uma ferramenta utilizada para identificar quais portas de rede estão **abertas**, **fechadas** ou **filtradas** em um host.
+
 Ele funciona enviando pacotes para portas específicas e analisando as respostas recebidas, o que permite inferir:
 
-Serviços em execução
+- Serviços em execução
+- Regras de firewall
+- Políticas de filtragem de rede
+- Comportamento da pilha TCP/IP do sistema alvo
 
-Regras de firewall
+---
 
-Políticas de filtragem de rede
+## Funcionalidades
 
-Funcionalidades
+- Validação de IPs e domínios
+- Resolução DNS automática
+- Identificação de alvos na rede local via ARP
+- Suporte a múltiplos tipos de scan
+- Escolha flexível de portas
+- Tratamento completo de exceções
+- Execução interativa via terminal
 
-Validação de IPs e domínios
+---
 
-Resolução DNS automática
+## Tipos de Scan Implementados
 
-Detecção de alvo em LAN (ARP)
+- **TCP SYN Scan**
+  - Envia pacotes SYN
+  - Identifica portas abertas sem completar o handshake TCP
 
-Múltiplos tipos de scan
+- **TCP ACK Scan**
+  - Utilizado para análise de regras de firewall
+  - Identifica se uma porta está filtrada ou não
 
-Escolha flexível de portas
+- **UDP Scan**
+  - Envia pacotes UDP
+  - Analisa respostas ICMP para inferir o estado da porta
 
-Tratamento de exceções e erros
+- **Decoy Scan**
+  - Utiliza IPs de origem falsos
+  - Dificulta a identificação do verdadeiro originador do scan
 
-Execução interativa via terminal
+---
 
-Tipos de Scan
+## Tecnologias Utilizadas
 
-TCP SYN Scan
+- Python 3
+- Scapy
+- Socket
+- ipaddress
+- Protocolos TCP, UDP, ICMP e ARP
 
-Envia pacotes SYN
+---
 
-Não completa o handshake
+## Requisitos
 
-Identifica portas abertas e fechadas
+- Sistema operacional Linux (recomendado)
+- Python 3.9 ou superior
+- Permissão de root (necessária para envio de pacotes raw)
 
-TCP ACK Scan
+> ⚠️ No Windows, o funcionamento é limitado devido às restrições no uso de raw sockets.
 
-Utilizado para análise de firewall
+---
 
-Identifica portas filtradas ou não filtradas
-
-UDP Scan
-
-Envia pacotes UDP
-
-Analisa respostas ICMP
-
-Decoy Scan
-
-Envia pacotes com IP de origem falso
-
-Utilizado para mascarar a origem do scan
-
-Tecnologias Utilizadas
-
-Python 3
-
-Scapy
-
-Socket (stdlib)
-
-ipaddress (stdlib)
-
-Protocolos TCP, UDP, ICMP e ARP
-
-Requisitos
-
-Linux (recomendado)
-
-Python 3.9+
-
-Permissão de root (raw sockets)
-
-⚠️ No Windows, o suporte é limitado devido a restrições de raw sockets.
-
-Instalação
+## Instalação
 
 Clone o repositório:
 
+```bash
 git clone <url-do-repositorio>
 cd Portscan
-
-
-Instale a dependência:
-
-pip install scapy
-
-
-Opcional (ambiente virtual):
-
-python3 -m venv venv
-source venv/bin/activate
-
-Execução
-
-O script deve ser executado como root:
-
-sudo python3 portscan.py
-
-
-Durante a execução, o programa solicitará:
-
-IP ou hostname do alvo
-
-Tipo de scan
-
-Portas a serem testadas
-
-Exemplos de Uso
-
-Scan em localhost:
-
-127.0.0.1
-
-
-Scan em host da rede:
-
-192.168.1.10
-
-
-Scan em domínio:
-
-scanme.nmap.org
-
-Tratamento de Erros
-
-O código trata situações como:
-
-IP inválido
-
-Domínio inexistente ou malformado
-
-Falha de resolução DNS
-
-Interrupção do usuário (Ctrl + C)
-
-Erros internos de envio de pacotes
-
-As mensagens são exibidas de forma clara, sem stack trace desnecessário.
-
-Análise de Pacotes
-
-Durante a execução, é possível capturar os pacotes com ferramentas como Wireshark para observar:
-
-Flags TCP (SYN, ACK, RST)
-
-Respostas ICMP
-
-Diferença entre portas abertas, fechadas e filtradas
