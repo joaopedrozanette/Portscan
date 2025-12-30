@@ -1,165 +1,127 @@
-🎯 Objetivos do Projeto
+Port Scanner em Python (Scapy)
 
-Implementar um scanner de portas funcional em Python
+Implementação de um scanner de portas em Python utilizando Scapy, com suporte a diferentes tipos de varredura TCP e UDP, validação de alvos e tratamento de erros.
 
-Trabalhar diretamente com pacotes TCP e UDP
+O projeto trabalha diretamente com pacotes de rede, permitindo observar como scanners como o Nmap funcionam em baixo nível.
 
-Compreender como diferentes tipos de scan funcionam
+O que é um Port Scanner
 
-Analisar respostas de rede para determinar o estado das portas
+Um port scanner é uma ferramenta usada para identificar quais portas de rede estão abertas, fechadas ou filtradas em um host.
+Ele funciona enviando pacotes para portas específicas e analisando as respostas recebidas, o que permite inferir:
 
-Aplicar validação rigorosa de entrada (IPs e domínios)
+Serviços em execução
 
-Utilizar técnicas reais de varredura de portas
+Regras de firewall
 
-Produzir um código organizado, legível e robusto
+Políticas de filtragem de rede
 
-🧠 Funcionamento Geral
+Funcionalidades
 
-O scanner segue o fluxo abaixo:
+Validação de IPs e domínios
 
-O usuário informa um IP ou hostname
+Resolução DNS automática
 
-A entrada é validada para garantir que seja:
+Detecção de alvo em LAN (ARP)
 
-Um IP válido
+Múltiplos tipos de scan
 
-Um domínio válido
+Escolha flexível de portas
 
-Caso seja um domínio, ocorre a resolução DNS
+Tratamento de exceções e erros
 
-O scanner tenta resolver o endereço MAC via ARP quando o alvo está na mesma rede local
+Execução interativa via terminal
 
-O usuário escolhe:
+Tipos de Scan
 
-O tipo de scan
-
-O conjunto de portas a ser testado
-
-Pacotes são enviados ao alvo
-
-As respostas recebidas são analisadas
-
-O estado de cada porta é exibido ao usuário
-
-🌐 Tipos de Scan Implementados
 TCP SYN Scan
 
-Envia pacotes TCP com a flag SYN
+Envia pacotes SYN
 
-Não completa o handshake TCP
+Não completa o handshake
 
-Utilizado para identificar portas abertas de forma discreta
-
-Interpretação:
-
-SYN + ACK → Porta aberta
-
-RST → Porta fechada
-
-Sem resposta → Porta filtrada
+Identifica portas abertas e fechadas
 
 TCP ACK Scan
 
-Envia pacotes TCP com a flag ACK
+Utilizado para análise de firewall
 
-Não identifica serviços
-
-Utilizado para mapear regras de firewall
-
-Interpretação:
-
-RST → Porta não filtrada
-
-Sem resposta → Porta filtrada
+Identifica portas filtradas ou não filtradas
 
 UDP Scan
 
-Envia pacotes UDP para as portas alvo
+Envia pacotes UDP
 
 Analisa respostas ICMP
-
-Interpretação:
-
-ICMP Type 3 → Porta fechada
-
-Sem resposta → Open | Filtered
 
 Decoy Scan
 
 Envia pacotes com IP de origem falso
 
-Utilizado para confundir logs e mecanismos de detecção
+Utilizado para mascarar a origem do scan
 
-Implementado com finalidade de estudo e compreensão da técnica
-
-📦 Tecnologias Utilizadas
+Tecnologias Utilizadas
 
 Python 3
 
 Scapy
 
-Socket (biblioteca padrão)
+Socket (stdlib)
 
-ipaddress (biblioteca padrão)
+ipaddress (stdlib)
 
-ARP, TCP, UDP, ICMP (protocolos de rede)
+Protocolos TCP, UDP, ICMP e ARP
 
-⚙️ Requisitos
-Sistema Operacional
+Requisitos
 
 Linux (recomendado)
 
-Windows possui suporte limitado para raw sockets
+Python 3.9+
 
-Permissões
+Permissão de root (raw sockets)
 
-O script deve ser executado como root (ou com sudo), pois utiliza raw sockets
+⚠️ No Windows, o suporte é limitado devido a restrições de raw sockets.
 
-Dependências
+Instalação
 
-Python 3.9 ou superior
+Clone o repositório:
 
-Scapy
-
-📥 Instalação
-1️⃣ Clonar o repositório
 git clone <url-do-repositorio>
 cd Portscan
 
-2️⃣ Criar ambiente virtual (opcional, mas recomendado)
+
+Instale a dependência:
+
+pip install scapy
+
+
+Opcional (ambiente virtual):
+
 python3 -m venv venv
 source venv/bin/activate
 
-3️⃣ Instalar dependências
-pip install scapy
+Execução
 
-4️⃣ Verificar instalação do Scapy
-python3 -c "from scapy.all import *; print('Scapy OK')"
-
-▶️ Execução
-
-Execute o script com privilégios de administrador:
+O script deve ser executado como root:
 
 sudo python3 portscan.py
 
 
-O programa apresentará um menu interativo solicitando:
+Durante a execução, o programa solicitará:
 
-Alvo (IP ou hostname)
+IP ou hostname do alvo
 
 Tipo de scan
 
 Portas a serem testadas
 
-🧪 Exemplos de Teste
+Exemplos de Uso
 
 Scan em localhost:
 
 127.0.0.1
 
 
-Scan em host da rede local:
+Scan em host da rede:
 
 192.168.1.10
 
@@ -168,51 +130,28 @@ Scan em domínio:
 
 scanme.nmap.org
 
-📊 Análise de Pacotes com Wireshark
+Tratamento de Erros
 
-Durante a execução do scanner, é possível capturar os pacotes utilizando o Wireshark para observar:
+O código trata situações como:
+
+IP inválido
+
+Domínio inexistente ou malformado
+
+Falha de resolução DNS
+
+Interrupção do usuário (Ctrl + C)
+
+Erros internos de envio de pacotes
+
+As mensagens são exibidas de forma clara, sem stack trace desnecessário.
+
+Análise de Pacotes
+
+Durante a execução, é possível capturar os pacotes com ferramentas como Wireshark para observar:
 
 Flags TCP (SYN, ACK, RST)
 
 Respostas ICMP
 
 Diferença entre portas abertas, fechadas e filtradas
-
-Filtros úteis:
-
-tcp
-udp
-icmp
-
-
-ou:
-
-tcp.port == 80
-
-⚠️ Tratamento de Erros e Exceções
-
-O código possui tratamento para:
-
-Interrupção pelo usuário (Ctrl + C)
-
-IP inválido
-
-Domínio malformado ou inexistente
-
-Erros de resolução DNS
-
-Erros internos do Scapy
-
-O objetivo é evitar a exposição de stack traces e fornecer mensagens claras ao usuário.
-
-🔒 Considerações de Segurança
-
-Utilize o scanner apenas em ambientes controlados
-
-Nunca execute scans sem autorização
-
-O uso indevido pode violar políticas de segurança e legislação vigente
-
-📌 Conclusão
-
-Este projeto demonstra, de forma prática, como scanners de portas funcionam em baixo nível, abordando conceitos fundamentais de redes, protocolos e análise de pacotes. Ele serve como uma base sólida para aprofundamento em áreas como segurança de redes, pentest, monitoramento e engenharia de redes.
