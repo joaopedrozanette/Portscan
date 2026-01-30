@@ -60,7 +60,7 @@ def udp_scan(target, port):
         response = sr1(packet, timeout=2, verbose=0)
 
         if response is None:
-            return "Open | Filtered"
+            return "Filtered"
         elif response.haslayer(ICMP):
             if int(response.getlayer(ICMP).type) == 3:
                 if int(response.getlayer(ICMP).code) in [1, 2, 9, 10, 13]:
