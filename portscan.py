@@ -1,277 +1,162 @@
-#!/usr/bin/env python3
-
-import os
 import sys
 import socket
-import re
-import ipaddress
-from scapy.all import (
-    IP, TCP, UDP, ICMP,
-    Ether, ARP,
-    sr1, srp,
-    RandIP, conf,
-    Scapy_Exception
-)
+import struct
+from scapy.all import IP, TCP, UDP, ICMP, sr1, conf, ARP, Ether, srp
 
-conf.verb = 0
-MAX_PORT = 65535
+# Configurações globais do Scapy
+conf.verb = 0  # Desativa mensagens internas do Scapy para um output limpo
 
-TOP_PORTS = [
-    21, 22, 23, 25, 53,
-    80, 110, 139, 143,
-    443, 445, 3306, 3389
-]
-
-# =====================================================
-# VALIDACAO DE ALVO (IP / DOMINIO)
-# =====================================================
-
-DOMAIN_REGEX = re.compile(
-    r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)"
-    r"(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$"
-)
-
-ONLY_IP_CHARS = re.compile(r"^[0-9.]+$")
-
-def validate_target(target: str) -> str:
-    target = target.strip()
-
-    # URL ou caminho
-    if "://" in target or "/" in target:
-        print("[-] Entrada inválida: informe apenas IP ou hostname (sem http://, https:// ou barras).")
-        sys.exit(1)
-
-    # Apenas números (ex: 123456)
-    if target.isdigit():
-        print("[-] Entrada inválida: não é um IP nem um domínio válido.")
-        sys.exit(1)
-
-    # Tentativa clara de IP (números e pontos)
-    if re.fullmatch(r"[0-9.]+", target):
-        try:
-            ipaddress.ip_address(target)
-            return target
-        except ValueError:
-            print("[-] IP inválido: formato incorreto ou octetos fora do intervalo (0–255).")
-            sys.exit(1)
-
-    # Domínio com '..'
-    if ".." in target:
-        print("[-] Domínio inválido: contém rótulos vazios ('..').")
-        sys.exit(1)
-
-    # Regex de domínio
-    if not DOMAIN_REGEX.fullmatch(target):
-        print("[-] Domínio inválido: formato incorreto.")
-        sys.exit(1)
-
-    # DNS
+def resolve_target(target):
+    """Resolve hostname para IP ou valida o IP de entrada."""
     try:
         return socket.gethostbyname(target)
     except socket.gaierror:
-        print("[-] Domínio inexistente: falha na resolução DNS.")
-        sys.exit(1)
-    except UnicodeError:
-        print("[-] Domínio inválido: erro de codificação.")
+        print(f"[-] Erro: Não foi possível resolver o alvo '{target}'")
         sys.exit(1)
 
+def is_host_up(target_ip):
+    """Verifica se o host está ativo antes de iniciar o scan."""
+    print(f"[*] Verificando se {target_ip} está ativo...")
+    
+    # 1. Tentativa via ARP (Eficiente para Rede Local - Camada 2)
+    arp_pkt = Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=target_ip)
+    ans, _ = srp(arp_pkt, timeout=2, verbose=0)
+    if ans:
+        print("[+] Host ativo detectado via ARP (Rede Local).")
+        return True
 
-# =====================================================
-# ARP
-# =====================================================
+    # 2. Tentativa via ICMP (Ping - Rede Externa - Camada 3)
+    ping_pkt = IP(dst=target_ip)/ICMP()
+    res = sr1(ping_pkt, timeout=2, verbose=0)
+    if res:
+        print("[+] Host ativo detectado via ICMP.")
+        return True
+    
+    return False
 
-def resolve_mac(ip: str) -> str | None:
-    arp = ARP(pdst=ip)
-    broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
-    pkt = broadcast / arp
-
-    answered, _ = srp(pkt, timeout=2, verbose=False)
-
-    if answered:
-        return answered[0][1].hwsrc
-    return None
-
-# =====================================================
-# MENUS
-# =====================================================
-
-def choose_scan() -> str:
-    options = {
-        "1": "syn",
-        "2": "ack",
-        "3": "udp",
-        "4": "decoy"
-    }
-
-    print("""
-Escolha o tipo de scan:
-1 - TCP SYN Scan
-2 - TCP ACK Scan
-3 - UDP Scan
-4 - Decoy Scan
-""")
-
-    choice = input("Opção: ").strip()
-
-    if choice not in options:
-        print("[-] Opção de scan inválida.")
-        sys.exit(1)
-
-    return options[choice]
-
-def choose_ports():
-    print("""
-Escolha as portas:
-1 - Portas padrão (22, 80, 443)
-2 - Top portas (estilo Nmap)
-3 - Porta específica
-4 - Intervalo de portas
-5 - Todas as portas (1-65535)
-""")
-
+def syn_scan(target, port):
+    """TCP SYN Scan (Stealth)"""
     try:
-        option = input("Opção: ").strip()
+        packet = IP(dst=target)/TCP(dport=port, flags="S")
+        response = sr1(packet, timeout=1, verbose=0)
+        
+        if response is None:
+            return "Filtered"
+        elif response.haslayer(TCP):
+            if response.getlayer(TCP).flags == 0x12: # SYN-ACK
+                # Envia RST para não deixar a conexão pendurada
+                sr1(IP(dst=target)/TCP(dport=port, flags="R"), timeout=1, verbose=0)
+                return "Open"
+            elif response.getlayer(TCP).flags == 0x14: # RST-ACK
+                return "Closed"
+        return "Unknown"
+    except (struct.error, OverflowError):
+        return "Invalid Port"
 
-        if option == "1":
-            return [22, 80, 443]
-
-        if option == "2":
-            return TOP_PORTS
-
-        if option == "3":
-            port = int(input("Digite a porta: "))
-            if not 1 <= port <= MAX_PORT:
-                raise ValueError("Porta fora do intervalo válido.")
-            return [port]
-
-        if option == "4":
-            start = int(input("Porta inicial: "))
-            end = int(input("Porta final: "))
-            if not (1 <= start <= end <= MAX_PORT):
-                raise ValueError("Intervalo de portas inválido.")
-            return range(start, end + 1)
-
-        if option == "5":
-            print("[!] Scan completo pode ser demorado.")
-            return range(1, MAX_PORT + 1)
-
-        raise ValueError("Opção inválida.")
-
-    except ValueError as e:
-        print(f"[-] {e}")
-        sys.exit(1)
-
-# =====================================================
-# FUNCOES DE SCAN
-# =====================================================
-
-def send_tcp(ip, port, flags, mac=None, src_ip=None):
-    pkt = IP(dst=ip, src=src_ip)/TCP(dport=port, flags=flags)
-    if mac:
-        pkt = Ether(dst=mac)/pkt
-    return sr1(pkt, timeout=1)
-
-def syn_scan(ip, ports, mac):
-    print("\n--- TCP SYN Scan ---")
+def udp_scan(target, port):
+    """UDP Scan (Baseado em respostas ICMP Unreachable)"""
     try:
-        for port in ports:
-            resp = send_tcp(ip, port, "S", mac)
+        packet = IP(dst=target)/UDP(dport=port)
+        response = sr1(packet, timeout=2, verbose=0)
+        
+        if response is None:
+            return "Open | Filtered"
+        elif response.haslayer(ICMP):
+            # Tipos e códigos ICMP que indicam filtragem ou porta fechada
+            if int(response.getlayer(ICMP).type) == 3:
+                if int(response.getlayer(ICMP).code) in [1, 2, 9, 10, 13]:
+                    return "Filtered"
+                elif int(response.getlayer(ICMP).code) == 3:
+                    return "Closed"
+        return "Open"
+    except (struct.error, OverflowError):
+        return "Invalid Port"
 
-            if resp and resp.haslayer(TCP):
-                if resp[TCP].flags == 0x12:
-                    print(f"Porta {port}: Open")
-                elif resp[TCP].flags == 0x14:
-                    print(f"Porta {port}: Closed")
+def ack_scan(target, port):
+    """TCP ACK Scan (Mapeamento de Firewall)"""
+    try:
+        packet = IP(dst=target)/TCP(dport=port, flags="A")
+        response = sr1(packet, timeout=1, verbose=0)
+        
+        if response is None:
+            return "Filtered"
+        elif response.haslayer(TCP):
+            if response.getlayer(TCP).flags == 0x04: # RST
+                return "Unfiltered"
+        return "Filtered"
+    except (struct.error, OverflowError):
+        return "Invalid Port"
+
+def parse_ports(ports_input):
+    """Trata entradas como '22', '80-100', '443' e valida o range de 16 bits."""
+    ports = []
+    # Remove vírgulas e separa por espaços
+    for part in ports_input.replace(',', ' ').split():
+        try:
+            if '-' in part:
+                start, end = map(int, part.split('-'))
+                for p in range(start, end + 1):
+                    if 0 <= p <= 65535:
+                        ports.append(p)
+                    else:
+                        print(f"[!] Porta {p} ignorada (fora do intervalo 0-65535).")
             else:
-                print(f"Porta {port}: Filtered")
-
-    except KeyboardInterrupt:
-        print("\n[!] Scan interrompido.")
-
-def ack_scan(ip, ports, mac):
-    print("\n--- TCP ACK Scan ---")
-    try:
-        for port in ports:
-            resp = send_tcp(ip, port, "A", mac)
-            print(f"Porta {port}: {'Unfiltered' if resp else 'Filtered'}")
-
-    except KeyboardInterrupt:
-        print("\n[!] Scan interrompido.")
-
-def udp_scan(ip, ports, mac):
-    print("\n--- UDP Scan ---")
-    try:
-        for port in ports:
-            pkt = IP(dst=ip)/UDP(dport=port)
-            if mac:
-                pkt = Ether(dst=mac)/pkt
-
-            resp = sr1(pkt, timeout=2)
-
-            if resp is None:
-                print(f"Porta {port}: Open | Filtered")
-            elif resp.haslayer(ICMP) and resp[ICMP].type == 3:
-                print(f"Porta {port}: Closed")
-
-    except KeyboardInterrupt:
-        print("\n[!] Scan interrompido.")
-
-def decoy_scan(ip, ports):
-    print("\n--- Decoy Scan ---")
-    try:
-        for port in ports:
-            resp = send_tcp(ip, port, "S", src_ip=RandIP())
-
-            if resp and resp.haslayer(TCP):
-                if resp[TCP].flags == 0x12:
-                    print(f"Porta {port}: Open")
-                elif resp[TCP].flags == 0x14:
-                    print(f"Porta {port}: Closed")
-            else:
-                print(f"Porta {port}: Unknown")
-
-    except KeyboardInterrupt:
-        print("\n[!] Scan interrompido.")
-
-# =====================================================
-# MAIN
-# =====================================================
+                p = int(part)
+                if 0 <= p <= 65535:
+                    ports.append(p)
+                else:
+                    print(f"[!] Porta {p} ignorada (fora do intervalo 0-65535).")
+        except ValueError:
+            print(f"[!] Entrada '{part}' inválida ignorada.")
+    return sorted(list(set(ports))) # Remove duplicatas e ordena
 
 def main():
-    if os.geteuid() != 0:
-        print("[-] Execute como root (sudo).")
-        sys.exit(1)
-
-    print("=== PortScanner Educacional (Scapy) ===")
-
+    print("\n" + "="*25)
+    print("   SCAPY PORT SCANNER ")
+    print("="*25 + "\n")
+    
     try:
-        target = input("Digite o IP ou hostname do alvo: ").strip()
-        ip = validate_target(target)
+        target_input = input("Digite o Alvo (IP ou Hostname): ")
+        target_ip = resolve_target(target_input)
 
-        mac = resolve_mac(ip)
-        if mac:
-            print(f"[+] MAC resolvido: {mac}")
-        else:
-            print("[*] Scan fora da LAN (ARP não aplicado).")
+        if not is_host_up(target_ip):
+            confirm = input("[!] Host parece offline. Continuar mesmo assim? (s/n): ")
+            if confirm.lower() != 's': return
 
-        scan_type = choose_scan()
-        ports = choose_ports()
+        print(f"\n[*] Alvo definido: {target_ip}")
+        print("\nEscolha o tipo de Scan:")
+        print("1. TCP SYN Scan (Stealth)")
+        print("2. UDP Scan")
+        print("3. TCP ACK Scan (Firewall Mapping)")
+        
+        choice = input("\nSelecione (1-3): ")
+        ports_str = input("Digite as portas (ex: 22, 80-100, 443): ")
+        ports = parse_ports(ports_str)
 
-        if scan_type == "syn":
-            syn_scan(ip, ports, mac)
-        elif scan_type == "ack":
-            ack_scan(ip, ports, mac)
-        elif scan_type == "udp":
-            udp_scan(ip, ports, mac)
-        elif scan_type == "decoy":
-            decoy_scan(ip, ports)
+        if not ports:
+            print("[-] Nenhuma porta válida para escanear.")
+            return
+
+        print(f"\n[!] Iniciando scan em {len(ports)} porta(s)...")
+        print(f"\n{'PORTA':<10} {'ESTADO':<15}")
+        print("-" * 30)
+
+        for port in ports:
+            if choice == '1': result = syn_scan(target_ip, port)
+            elif choice == '2': result = udp_scan(target_ip, port)
+            elif choice == '3': result = ack_scan(target_ip, port)
+            else: 
+                print("Opção inválida.")
+                break
+            
+            print(f"{port:<10} {result:<15}")
+
+        print("\n[+] Scan finalizado com sucesso.")
 
     except KeyboardInterrupt:
-        print("\n[!] Execução cancelada pelo usuário.")
-        sys.exit(0)
-
-    except Scapy_Exception as e:
-        print(f"[-] Erro Scapy: {e}")
+        print("\n\n[!] Interrompido pelo usuário. Saindo...")
+    except Exception as e:
+        print(f"\n[!] Erro crítico no sistema: {e}")
 
 if __name__ == "__main__":
     main()
