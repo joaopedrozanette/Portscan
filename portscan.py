@@ -1,8 +1,18 @@
+from scapy.all import IP, TCP, UDP, ICMP, sr1, conf, ARP, Ether, srp, get_if_list
 import sys
 import socket
 import struct
-from scapy.all import IP, TCP, UDP, ICMP, sr1, conf, ARP, Ether, srp
+import logging
+import warnings
 
+# --- BLOCO DE SUPRESSÃO DE AVISOS ---
+# Silencia warnings chatos do Scapy
+warnings.filterwarnings("ignore")
+logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
+# ------------------------------------
+
+
+# Configurações globais do Scapy
 conf.verb = 0
 
 
@@ -16,22 +26,77 @@ def resolve_target(target):
 
 
 def is_host_up(target_ip):
-    """Verifica se o host está ativo antes de iniciar o scan."""
+    """
+    Verifica se o host está ativo usando múltiplas técnicas para contornar
+    problemas de roteamento e isolamento de interface.
+    Retorna: (True, nome_da_interface) ou (False, None)
+    """
     print(f"[*] Verificando se {target_ip} está ativo...")
 
-    arp_pkt = Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=target_ip)
-    ans, _ = srp(arp_pkt, timeout=2, verbose=0)
-    if ans:
-        print("[+] Host ativo detectado via ARP (Rede Local).")
-        return True
+    # 1. TENTATIVA VIA SOCKET DO SISTEMA (Bypass do Scapy)
+    # Deixa o Kernel do Linux decidir a rota. É o método mais robusto para cross-subnet.
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.8)
+        # Tenta conectar na porta 80 (HTTP) ou 443 (HTTPS) ou 445 (SMB)
+        # Se der erro 111 (Connection Refused), o host ESTÁ VIVO, só a porta está fechada.
+        res = s.connect_ex((target_ip, 80))
+        s.close()
 
-    ping_pkt = IP(dst=target_ip)/ICMP()
-    res = sr1(ping_pkt, timeout=2, verbose=0)
-    if res:
-        print("[+] Host ativo detectado via ICMP.")
-        return True
+        # 0 = Aberta, 111 = Recusada (Linux), 10061 = Recusada (Windows)
+        if res == 0 or res == 111 or res == 10061:
+            print("[+] Host detectado via Tabela de Roteamento do SO (TCP).")
+            return True, None  # None = deixa o SO decidir a interface
+    except:
+        pass
 
-    return False
+    # 2. TENTATIVA VIA SCAPY (Iteração de Interfaces)
+    interfaces = get_if_list()
+    for iface in interfaces:
+        if iface == 'lo':
+            continue  # Pula localhost
+
+        try:
+            # Obtém o IP da interface atual para evitar IP Spoofing
+            my_ip_list = [x[4] for x in conf.route.routes if x[3]
+                          == iface and x[4] != '0.0.0.0']
+            if not my_ip_list:
+                continue
+            my_ip = my_ip_list[0]
+
+            # A. Tentativa ARP (Camada 2 - Mesma Sub-rede)
+            arp_pkt = Ether(dst="ff:ff:ff:ff:ff:ff") / \
+                ARP(pdst=target_ip, psrc=my_ip)
+            ans, _ = srp(arp_pkt, timeout=0.8, verbose=0, iface=iface)
+            if ans:
+                print(
+                    f"[+] Host ativo detectado via ARP na interface {iface}.")
+                return True, iface
+
+            # B. Tentativa ICMP (Camada 3 - Ping)
+            ping_pkt = IP(dst=target_ip, src=my_ip)/ICMP()
+            res = sr1(ping_pkt, timeout=0.8, verbose=0, iface=iface)
+            if res:
+                print(
+                    f"[+] Host ativo detectado via ICMP na interface {iface}.")
+                return True, iface
+        except:
+            continue
+
+    # 3. TENTATIVA FINAL: TCP SYN PING (Força Bruta)
+    print("[-] ARP e ICMP falharam. Tentando TCP SYN Discovery...")
+    for dport in [80, 443, 22]:
+        try:
+            # Envia pacote SYN sem forçar interface, deixa o scapy resolver
+            pkt = IP(dst=target_ip)/TCP(dport=dport, flags="S")
+            resp = sr1(pkt, timeout=1, verbose=0)
+            if resp:
+                print(f"[+] Host respondeu ao TCP SYN na porta {dport}.")
+                return True, conf.iface
+        except:
+            pass
+
+    return False, None
 
 
 def syn_scan(target, port):
@@ -43,10 +108,11 @@ def syn_scan(target, port):
         if response is None:
             return "Filtered"
         elif response.haslayer(TCP):
-            if response.getlayer(TCP).flags == 0x12:
+            if response.getlayer(TCP).flags == 0x12:  # SYN-ACK
+                # Envia RST para não deixar a conexão pendurada
                 sr1(IP(dst=target)/TCP(dport=port, flags="R"), timeout=1, verbose=0)
                 return "Open"
-            elif response.getlayer(TCP).flags == 0x14:
+            elif response.getlayer(TCP).flags == 0x14:  # RST-ACK
                 return "Closed"
         return "Unknown"
     except (struct.error, OverflowError):
@@ -60,8 +126,9 @@ def udp_scan(target, port):
         response = sr1(packet, timeout=2, verbose=0)
 
         if response is None:
-            return "Filtered"
+            return "Open | Filtered"
         elif response.haslayer(ICMP):
+            # Tipos e códigos ICMP que indicam filtragem ou porta fechada
             if int(response.getlayer(ICMP).type) == 3:
                 if int(response.getlayer(ICMP).code) in [1, 2, 9, 10, 13]:
                     return "Filtered"
@@ -91,6 +158,7 @@ def ack_scan(target, port):
 def parse_ports(ports_input):
     """Trata entradas como '22', '80-100', '443' e valida o range de 16 bits."""
     ports = []
+    # Remove vírgulas e separa por espaços
     for part in ports_input.replace(',', ' ').split():
         try:
             if '-' in part:
@@ -110,7 +178,7 @@ def parse_ports(ports_input):
                         f"[!] Porta {p} ignorada (fora do intervalo 0-65535).")
         except ValueError:
             print(f"[!] Entrada '{part}' inválida ignorada.")
-    return sorted(list(set(ports)))
+    return sorted(list(set(ports)))  # Remove duplicatas e ordena
 
 
 def main():
@@ -122,11 +190,19 @@ def main():
         target_input = input("Digite o Alvo (IP ou Hostname): ")
         target_ip = resolve_target(target_input)
 
-        if not is_host_up(target_ip):
+        # Chama a nova função de discovery
+        is_up, found_iface = is_host_up(target_ip)
+
+        if not is_up:
             confirm = input(
                 "[!] Host parece offline. Continuar mesmo assim? (s/n): ")
             if confirm.lower() != 's':
                 return
+        else:
+            # Se encontramos uma interface específica, configuramos o Scapy para usá-la
+            if found_iface:
+                conf.iface = found_iface
+                print(f"[*] Interface definida para o scan: {found_iface}")
 
         print(f"\n[*] Alvo definido: {target_ip}")
         print("\nEscolha o tipo de Scan:")
